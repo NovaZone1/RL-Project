@@ -1,0 +1,42 @@
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter
+.ipynb_checkpoints/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# Conda 环境目录
+.conda/
+
+# IDE
+.vscode/
+.idea/
+
+# 日志
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 实验输出
+runs/
+outputs/
+logs/
+
+# 模型权重 / checkpoint
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# 临时文件
+*.tmp
+*.temp

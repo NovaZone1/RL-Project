@@ -1,0 +1,9 @@
+name: base
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - conda[version='>=26.3.2']
+  - mamba[version='>=2.6.0']
+  - pip
+prefix: /home/ybw/miniforge3
