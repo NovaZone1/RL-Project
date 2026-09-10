@@ -138,56 +138,56 @@ from environment import GridWorld
 env = GridWorld()
 rng = np.random.default_rng(42)
 
-max_episodes = 1000
-max_steps = 500
-gamma =1.0
-alpha = 0.1
-n_actions = 4
-epsilon =0.1
+max_episodes = 1000 # 最大训练轮次
+max_steps = 500 #每一轮次最大步数，尽量取大一点
+gamma =1.0 #折扣率
+alpha = 0.1 #学习率
+n_actions = 4 #动作数
+epsilon =0.1 #随机探索率
 Q = np.zeros((env.rows,env.cols,n_actions))  # 需要维护这样一个Q table
-steps_episodes = []
+steps_episodes = [] #统计每轮次的步数
 
 #train
 
 for episode in range(max_episodes):
 
-    state = env.reset()
+    state = env.reset() #先初始化环境
 
     for step in range(max_steps):
 
-        row,col = state
+        row,col = state #先存下此时的状态，便于后面取最大值
 
-        if rng.random() < epsilon:
+        if rng.random() < epsilon: #随机探索
 
-            action = rng.integers(n_actions)
+            action = rng.integers(n_actions) 
 
         else:
 
             q_values = Q[row,col]
 
-            best_actions = np.flatnonzero(q_values == q_values.max())
+            best_actions = np.flatnonzero(q_values == q_values.max()) #取得此状态下价值最大的动作的序号
 
-            action = rng.choice(best_actions)
+            action = rng.choice(best_actions) #随机取同价值的动作
 
-        next_state,reward,done = env.step(action)
+        next_state,reward,done = env.step(action) 
 
         if done:
 
-            target = reward
+            target = reward #因为到达终点后不存在下一个Q
 
         else:
 
-            next_row,next_col = next_state
+            next_row,next_col = next_state #同上
 
             target = reward + gamma * Q[next_row,next_col].max()
 
-        state = next_state 
+        state = next_state #更新环境
 
         q_old = Q[row,col,action]
 
-        td_error = target - Q[row,col,action]
+        td_error = target - Q[row,col,action] #计算td_error
 
-        Q[row,col,action] = q_old + alpha * td_error
+        Q[row,col,action] = q_old + alpha * td_error #更新Q值
 
         if done:
 
@@ -214,7 +214,7 @@ for episode in range(evaluation_episodes):
 
     state = env.reset()
 
-    for step in range(evaluation_steps):
+    for step in range(evaluation_steps): #此时不要随机探索，因为前面那个Q table理论上已经存下最优路径
 
         row,col = state
 
