@@ -457,3 +457,170 @@
 #     new_predicted_q.detach()
 # )
 
+import numpy as np 
+import torch 
+import torch.nn as nn
+import torch.optim as optim
+from collections import deque  #可以自动固定列表存储长度，而不是像普通列表那样无限存储
+from environment import GridWorld
+
+env = GridWorld()
+rng = np.random.default_rng(42)
+state_dims = 16
+action_dims = 4
+torch.manual_seed(42)
+batch_size = 8
+gamma = 1.0
+#定义一个q网络的类，这个类初始化网路参数，每个层以及定义前向传播
+class QNetwork(nn.Module):
+
+    def __init__(self,
+                 state_dims,
+                 action_dims):
+
+        super().__init__()
+
+        self.network = nn.Sequential(
+            nn.Linear(state_dims,64),
+            nn.ReLU(),
+            nn.Linear(64,action_dims)
+                        )
+
+    def forward(self,x):
+
+        return self.network(x)
+
+def state_to_tensor(state):
+
+    row,col = state
+
+    state_index = env.cols * row + col
+
+    one_hot = np.zeros(env.rows * env.cols,dtype=np.float32)
+
+    one_hot[state_index] = 1
+
+    state_tensor = torch.tensor(one_hot,dtype=torch.float32)
+
+    return state_tensor
+
+class ReplayBuffer:
+
+    def __init__(self,
+                 capacity):
+
+        self.buffer = deque(maxlen=capacity)
+
+    def push(self,
+             state,
+             action,
+             reward,
+             next_state,
+             done):
+
+        transition = (state,
+                     action,
+                     reward,
+                     next_state,
+                     done)
+
+        self.buffer.append(transition)
+
+    def sample(self,batch_size):
+
+        indices = rng.choice(len(self.buffer),
+                           size=batch_size,
+                           replace = False)
+
+        batch = [self.buffer[i]
+                 for i in indices]
+
+        return batch
+
+    def __len__(self):
+
+        return len(self.buffer)
+
+buffer = ReplayBuffer(capacity=1000)
+
+state = env.reset()
+
+for episode in range(200):
+
+    action = rng.integers(action_dims)
+
+    next_state,reward,done = env.step(action)
+
+    buffer.push(
+        state,
+        action,
+        reward,
+        next_state,
+        done
+    )
+
+    state = next_state
+
+    if done:
+
+        state = env.reset()
+
+batch = buffer.sample(batch_size)
+
+# =========================
+# Batch -> Tensor
+# =========================
+
+states, actions, rewards, next_states, dones = zip(
+    *batch
+)
+
+states_tensor = torch.stack([
+    state_to_tensor(state)
+    for state in states
+])
+
+actions_tensor = torch.tensor(actions,dtype=torch.long)
+
+rewards_tensor = torch.tensor(rewards,dtype=torch.float32)
+
+next_states_tensor = torch.stack([
+    state_to_tensor(next_state)
+    for next_state in next_states
+])
+
+dones_tensor = torch.tensor(dones,dtype=torch.float32)
+
+q_network = QNetwork(state_dims,action_dims)
+
+q_values = q_network(states_tensor)
+
+predicted_q = q_values.gather(1,actions_tensor.unsqueeze(1)).squeeze(1)
+
+with torch.no_grad():
+
+    next_q_values = q_network(next_states_tensor)
+
+    best_next_q = torch.max(next_q_values,dim=1).values
+
+    targets = rewards_tensor + gamma * best_next_q *(1 - dones_tensor)
+
+loss_fun = nn.MSELoss()
+
+optimizer = optim.Adam(
+    params = q_network.parameters(),
+    lr = 0.001
+)
+
+loss = loss_fun(predicted_q,targets)
+
+optimizer.zero_grad()
+
+loss.backward()
+
+optimizer.step()
+
+print("Loss:", loss.item())
+
+
+
