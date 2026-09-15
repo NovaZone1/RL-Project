@@ -16,6 +16,8 @@ steps_episode = []
 gamma = 1.0
 learning_rate = 0.001
 clip_epsilon = 0.2
+gae_lambda = 0.95
+entropy_coef = 0.01
 
 class ActorNetwork(nn.Module):
 
@@ -133,23 +135,128 @@ for episode in range(max_episodes):
     else:
         steps_episode.append(max_steps)
 
-    returns = []
+    #基础advantage计算
+    # returns = []
 
-    G = 0.0
+    # G = 0.0
 
-    for reward in reversed(rewards):
+    # for reward in reversed(rewards):
 
-        G = reward + gamma * G
+    #     G = reward + gamma * G
 
-        returns.append(G)
+    #     returns.append(G)
 
-    returns.reverse()
+    # returns.reverse()
 
-    returns_tensor = torch.tensor(returns,dtype = torch.float32)
+    # returns_tensor = torch.tensor(returns,dtype = torch.float32)
+
+    # values_tensor = torch.stack(values)
+
+    # advantages_tensor = returns_tensor - values_tensor
+
+    # =========================
+    # Compute GAE
+    # =========================
 
     values_tensor = torch.stack(values)
 
-    advantages_tensor = returns_tensor - values_tensor
+    advantages = []
+
+    gae = 0.0
+
+
+    # 1. 先确定 rollout 最后状态的 V(s)
+    #
+    # 如果已经真正到 terminal：
+    #     V(next_state) = 0
+    #
+    # 如果只是因为 max_steps 截断：
+    #     用 Critic 估计最后状态的 value
+
+    with torch.no_grad():
+
+        if done:
+            next_value = 0.0
+        else:
+            final_state_tensor = state_to_tensor(state)
+            next_value = critic_network(final_state_tensor)
+
+
+    # 2. 从最后一步往前计算 GAE
+
+    for t in reversed(range(len(rewards))):
+
+        # 当前这一步是不是 terminal
+        done_t = dones[t]
+
+
+        # 当前状态价值
+        value_t = values[t]
+
+
+        # TD Error:
+        #
+        # δ_t =
+        # r_t
+        # + γ(1-done)V(s_{t+1})
+        # - V(s_t)
+
+        delta = rewards[t] + gamma * (1 - done_t) * next_value - value_t
+
+
+        # GAE:
+        #
+        # A_t =
+        # δ_t
+        # + γ λ (1-done) A_{t+1}
+
+        gae = delta + gamma * gae_lambda * (1 - done_t) * gae
+
+
+        advantages.append(gae)
+
+
+        # 往前移动以后，
+        # 当前 V(s_t)
+        # 会成为上一时刻的 V(s_{t+1})
+
+        next_value = value_t
+
+
+    # 3. 因为刚才是倒着保存
+    # 恢复正常时间顺序
+
+    advantages.reverse()
+
+
+    # 4. 转成 Tensor
+
+    advantages_tensor = torch.stack(advantages)
+
+
+    # 5. Critic 的训练 target
+    #
+    # A_t = Return_target - V(s_t)
+    #
+    # 所以：
+    #
+    # Return_target = A_t + V(s_t)
+
+    returns_tensor = advantages_tensor + values_tensor
+
+    # =========================
+    # Advantage Normalization
+    # =========================
+
+    advantages_tensor = (
+        advantages_tensor
+        - advantages_tensor.mean()
+    ) / (
+        advantages_tensor.std(
+            unbiased=False
+        )
+        + 1e-8
+    )
 
     #这里的处理要注意
     states_tensor = torch.stack(
@@ -184,7 +291,9 @@ for episode in range(max_episodes):
 
         surr2 = clipped_ratio * advantages_tensor
 
-        actor_loss = -torch.mean(torch.minimum(surr1,surr2))
+        entropy = distribution.entropy().mean()
+
+        actor_loss = -torch.mean(torch.minimum(surr1,surr2)) - entropy_coef * entropy
 
         actor_optimizer.zero_grad()
 
@@ -288,5 +397,12 @@ print(
 
 print(
     f"成功率: {success_rate:.2f}"
+)
+
+print(
+    advantages_tensor.mean().item(),
+    advantages_tensor.std(
+        unbiased=False
+    ).item()
 )
 
