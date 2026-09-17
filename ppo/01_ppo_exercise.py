@@ -12,12 +12,19 @@ max_episodes = 1000
 max_steps = 200
 ppo_epochs = 4
 steps_episode = []
+max_updates = 1000
+rollout_steps = 128
+batch_size = 32
 
 gamma = 1.0
 learning_rate = 0.001
 clip_epsilon = 0.2
 gae_lambda = 0.95
 entropy_coef = 0.01
+
+episode_steps = 0
+episode_lengths = []
+update_count = 0
 
 class ActorNetwork(nn.Module):
 
@@ -84,7 +91,10 @@ critic_optimizer = optim.Adam(
     lr = learning_rate
 )
 
-for episode in range(max_episodes):
+
+state = env.reset()
+
+for update in range(max_updates):
 
     states = []
     actions = []
@@ -93,9 +103,7 @@ for episode in range(max_episodes):
     old_log_probs = []
     values = []
 
-    state = env.reset()
-
-    for step in range(max_steps):
+    for step in range(rollout_steps):
 
         state_tensor = state_to_tensor(state)
 
@@ -114,6 +122,7 @@ for episode in range(max_episodes):
 
         next_state, reward, done = env.step(action.item())
 
+
         states.append(state)
 
         actions.append(action.item())
@@ -126,14 +135,21 @@ for episode in range(max_episodes):
 
         values.append(value.detach())
 
-        state = next_state
+        episode_steps += 1
 
         if done:
-            steps_episode.append(step + 1)
-            break
 
-    else:
-        steps_episode.append(max_steps)
+            episode_lengths.append(
+                episode_steps
+            )
+
+            episode_steps = 0
+
+            state = env.reset()
+
+        else:
+
+            state = next_state
 
     #基础advantage计算
     # returns = []
@@ -268,59 +284,91 @@ for episode in range(max_episodes):
 
     old_log_probs_tensor = torch.stack(old_log_probs)
 
+    num_samples = len(states_tensor)
+
+    # update_count = 0
+
     for _ in range(ppo_epochs):
 
-        logits = actor_network(states_tensor)
+        indices = torch.randperm(num_samples)
 
-        distribution = torch.distributions.Categorical(
-            logits = logits
-        )
+        for start in range(
+            0,
+            num_samples,
+            batch_size
+        ):
+            end = start + batch_size
 
-        new_log_probs = distribution.log_prob(actions_tensor)
+            batch_indices = indices[start:end]
 
-        ratio = torch.exp(new_log_probs - old_log_probs_tensor)
+            batch_states = states_tensor[batch_indices]
 
-        surr1 = ratio * advantages_tensor
+            batch_actions = actions_tensor[batch_indices]
 
-        clipped_ratio = torch.clamp(
+            batch_old_log_probs = old_log_probs_tensor[batch_indices]
 
-            ratio,
-            1 - clip_epsilon,
-            1 + clip_epsilon
-        )
+            batch_returns = returns_tensor[batch_indices]
 
-        surr2 = clipped_ratio * advantages_tensor
+            batch_advantages = advantages_tensor[batch_indices]
 
-        entropy = distribution.entropy().mean()
+            logits = actor_network(batch_states)
 
-        actor_loss = -torch.mean(torch.minimum(surr1,surr2)) - entropy_coef * entropy
+            distribution = torch.distributions.Categorical(
+                logits = logits
+            )
 
-        actor_optimizer.zero_grad()
+            new_log_probs = distribution.log_prob(batch_actions)
 
-        actor_loss.backward()
+            ratio = torch.exp(new_log_probs - batch_old_log_probs)
 
-        actor_optimizer.step()
+            surr1 = ratio * batch_advantages
 
-        predicted_values = critic_network(states_tensor)
+            clipped_ratio = torch.clamp(
 
-        critic_loss = nn.MSELoss()(predicted_values,returns_tensor)
+                ratio,
+                1 - clip_epsilon,
+                1 + clip_epsilon
+            )
 
-        critic_optimizer.zero_grad()
+            surr2 = clipped_ratio * batch_advantages
 
-        critic_loss.backward()
+            entropy = distribution.entropy().mean()
 
-        critic_optimizer.step()
+            actor_loss = -torch.mean(torch.minimum(surr1,surr2)) - entropy_coef * entropy
 
-    if (episode + 1) % 100 == 0:
+            actor_optimizer.zero_grad()
 
-        avg_steps = np.mean(
-            steps_episode[-100:]
-        )
+            actor_loss.backward()
 
-        print(
-            f"Episode {episode + 1:4d} "
-            f"| avg steps = {avg_steps:.2f}"
-        )
+            actor_optimizer.step()
+
+            predicted_values = critic_network(batch_states)
+
+            critic_loss = nn.MSELoss()(predicted_values,batch_returns)
+
+            critic_optimizer.zero_grad()
+
+            critic_loss.backward()
+
+            critic_optimizer.step()
+
+    #         update_count += 1
+
+    # print("gradient updates:", update_count)
+
+    # if (update + 1) % 10 == 0:
+
+    #     if len(episode_lengths) > 0:
+
+    #         avg_steps = np.mean(
+    #             episode_lengths[-20:]
+    #         )
+
+    #         print(
+    #             f"Update {update + 1:4d} "
+    #             f"| avg episode steps = {avg_steps:.2f}"
+    #         )
+
 
 eval_episodes = 100
 eval_max_steps = 200
